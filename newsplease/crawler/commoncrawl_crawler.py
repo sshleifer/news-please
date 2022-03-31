@@ -17,7 +17,7 @@ import socket
 from dateutil import parser
 from scrapy.utils.log import configure_logging
 
-from ..crawler.commoncrawl_extractor import CommonCrawlExtractor
+from ..crawler.commoncrawl_extractor import CommonCrawlExtractor, less_noise
 
 from fire import Fire
 import hashlib
@@ -30,12 +30,17 @@ from datetime import date
 
 import socket
 import sh
-
+import warcio
+from warcio.exceptions import ArchiveLoadFailed
+from pathlib import Path
+ROOT_DIR = Path(__file__).parent.parent
+assert ROOT_DIR.name == 'news-please', ROOT_DIR
+INDEX_FILE = os.path.join(ROOT_DIR, 'cc_full.index')
 
 logger = logging.getLogger(__name__)
 log_level = logging.INFO
 logging.basicConfig(level=log_level)
-
+less_noise()
 SLURMLIST="inst-0kygf-elegant-pegasus,inst-1peuj-elegant-pegasus,inst-4ilmp-elegant-pegasus,inst-4mhhw-elegant-pegasus,inst-6utfo-elegant-pegasus,inst-8cas1-elegant-pegasus,inst-bm1tl-elegant-pegasus,inst-c3vih-elegant-pegasus,inst-ceia2-elegant-pegasus,inst-cu41e-elegant-pegasus,inst-czlp2-elegant-pegasus,inst-dxwdy-elegant-pegasus,inst-e06o7-elegant-pegasus,inst-e7jdm-elegant-pegasus,inst-eg5rm-elegant-pegasus,inst-evudf-elegant-pegasus,inst-faunu-elegant-pegasus,inst-ieq5l-elegant-pegasus,inst-ixm8o-elegant-pegasus,inst-kwjdc-elegant-pegasus,inst-n8ztw-elegant-pegasus,inst-nmggj-elegant-pegasus,inst-pvwsj-elegant-pegasus,inst-qsk26-elegant-pegasus,inst-qukiw-elegant-pegasus,inst-rt9cr-elegant-pegasus,inst-szfph-elegant-pegasus,inst-t6h37-elegant-pegasus,inst-xl6if-elegant-pegasus,inst-z2ukx-elegant-pegasus"
 ORACLE_HOSTS = {k: i for i,k in enumerate(SLURMLIST.split(','))}
 import numpy as np
@@ -52,42 +57,26 @@ DATA_DIR = "s3://character-ai-eu-frankfurt-1/checkpoints/sam/cc_news"
 ARTICLE_DIR = os.path.join(DATA_DIR, 'articles')
 # log file of fully extracted WARC files
 n_warc_files_on_cc = 0
-
-
-__counter_article_passed = 0
-__counter_article_discarded = 0
-__counter_article_error = 0
-__counter_article_total = 0
 __counter_warc_skipped = 0
 __counter_warc_processed = 0
 __start_time = time.time()
 
 
-__common_crawl_start_date = datetime.datetime(2016, 8, 26) # When Common Crawl started.
+CC_START_DATE = datetime.datetime(2016, 8, 26) # When Common Crawl started.
 configure_logging({"LOG_LEVEL": "ERROR"})
-logging.getLogger('requests').setLevel(logging.CRITICAL)
-logging.getLogger('readability').setLevel(logging.CRITICAL)
-logging.getLogger('PIL').setLevel(logging.CRITICAL)
-logging.getLogger('newspaper').setLevel(logging.CRITICAL)
-logging.getLogger('newsplease').setLevel(logging.CRITICAL)
-logging.getLogger('urllib3').setLevel(logging.CRITICAL)
-logging.getLogger('jieba').setLevel(logging.CRITICAL)
 
 
 def __iterate_by_month(start_date=None, end_date=None, month_step=1):
     if start_date is None:
-        # The starting month of Common Crawl.
-        start_date = __common_crawl_start_date
+        start_date = CC_START_DATE
     if end_date is None:
-        # Until now.
         end_date = datetime.datetime.today()
     current_date = start_date
     while current_date < end_date:
         yield current_date
         carry, new_month = divmod(current_date.month - 1 + month_step, 12)
         new_month += 1
-        current_date = current_date.replace(year=current_date.year + carry,
-                                            month=new_month)
+        current_date = current_date.replace(year=current_date.year + carry, month=new_month)
 
 
 def __extract_date_from_warc_filename(path):
@@ -102,28 +91,22 @@ def __extract_date_from_warc_filename(path):
         return None #20210327090019
 
 
-def __date_within_period(date, start_date=None, end_date=None):
+def _is_date_within_period(date, start_date=None, end_date=None) -> bool:
     if date is None: return False
     if start_date is None:
         # The starting month of Common Crawl.
-        start_date = __common_crawl_start_date
+        start_date = CC_START_DATE
     if end_date is None:
         # Until now.
         end_date = datetime.datetime.today()
     return start_date <= date < end_date
 
-
+# aws s3 ls --recursive s3://commoncrawl/crawl-data/CC-NEWS/ --no-sign-request | awk '{ print $4 }' > cc_full.index
 def get_remote_index(warc_files_start_date, warc_files_end_date, temp_filename = 'cc.index'):
     """Gets the index of news crawl files from commoncrawl.org and returns an array of names
     """
     cmd = ''
     if warc_files_start_date or warc_files_end_date:
-        # cleanup
-        try:
-            os.remove(temp_filename)
-        except OSError:
-            pass
-
         # The news files are grouped per year and month in separate folders
         warc_dates = __iterate_by_month(start_date=warc_files_start_date, end_date=warc_files_end_date)
         for date in warc_dates:
@@ -136,6 +119,7 @@ def get_remote_index(warc_files_start_date, warc_files_end_date, temp_filename =
     awk_parameter = '"{ print $4 }"' if os.name == 'nt' else "'{ print $4 }'"
     cmd += f"awk {awk_parameter} {temp_filename} "
     logger.info('executing: %s', cmd)
+    raise ValueError(cmd)
     exitcode, stdout_data = subprocess.getstatusoutput(cmd)
 
     if exitcode > 0:
@@ -146,7 +130,7 @@ def get_remote_index(warc_files_start_date, warc_files_end_date, temp_filename =
     if warc_files_start_date or warc_files_end_date:
         # Now filter further on day of month, hour, minute
         lines = [
-            p for p in lines if __date_within_period(
+            p for p in lines if _is_date_within_period(
                 __extract_date_from_warc_filename(p),
                 start_date=warc_files_start_date,
                 end_date=warc_files_end_date,
@@ -171,7 +155,7 @@ def set_creds():
     os.environ["AZURE_STORAGE_ACCOUNT_NAME"] = rclone_config["azure"]["account"]
     os.environ["AZURE_STORAGE_ACCOUNT_KEY"] = rclone_config["azure"]["key"]
 
-
+import socket
 set_creds()
 def finished_warc_callback(warc_path, counter_article_passed, counter_article_discarded, counter_article_error,
                            counter_article_total):
@@ -185,7 +169,8 @@ def finished_warc_callback(warc_path, counter_article_passed, counter_article_di
     h_per_warc = elapsed_secs / __counter_warc_processed / 3600
     remaining_warcs = n_warc_files_on_cc - (__counter_warc_processed + __counter_warc_skipped)
 
-    logger.info("warc processing statistics")
+    host = socket.gethostname()
+    print(f'hostname={host}, {warc_path}')
     logger.info("warc files skipped = %i, processed = %i, remaining = %i, total = %i", __counter_warc_skipped,
                 __counter_warc_processed, remaining_warcs, n_warc_files_on_cc)
     logger.info("global [s/article] = %f", sec_per_article)
@@ -193,8 +178,7 @@ def finished_warc_callback(warc_path, counter_article_passed, counter_article_di
     logger.info("estimated remaining time [h] = %f", remaining_warcs / h_per_warc)
 
 
-import warcio
-from warcio.exceptions import ArchiveLoadFailed
+
 def extract(warc_url,  **kwargs):
     cce = CommonCrawlExtractor(**kwargs)
     try:
@@ -208,17 +192,16 @@ def crawl_from_commoncrawl(valid_hosts=None,
                            start_date=None, end_date=None, warc_files_start_date=None, warc_files_end_date=None,
                            strict_date=True, reuse_previously_downloaded_files=True, save_dir=None,
                            continue_after_error=True, show_download_progress=False, nproc=4, log_level=logging.ERROR,
-                           delete_warc_after_extraction=True, continue_process=True, fetch_images=False,
+                           delete_warc_after_extraction=True, # TODO(SS): Del
+                           continue_process=True, fetch_images=False,
                            process_hardcoded_partition=True):
     """
     Crawl and extract articles form the news crawl provided by commoncrawl.org. For each article that was extracted
     successfully the callback function callback_on_article_extracted is invoked where the first parameter is the
     article object.
     """
-
-
-    done_urls = get_fully_extracted_warc_urls(logfile) if logfile is not None else []
-    urls_to_process = get_urls_to_process(continue_process, nproc, warc_files_end_date, warc_files_start_date, done_urls)
+    done_urls = get_fully_extracted_warc_urls(logfile) if logfile is not None and continue_process else []
+    urls_to_process = get_unprocessed_urls(done_urls, continue_process, warc_files_end_date, warc_files_start_date)
 
     kwargs = dict(save_dir=save_dir,
                   callback_on_warc_completed=finished_warc_callback,
@@ -240,33 +223,24 @@ def crawl_from_commoncrawl(valid_hosts=None,
             extract(url, **kwargs)
 
 
-def get_urls_to_process(continue_process, nproc, warc_files_end_date, warc_files_start_date, fully_extracted_warc_urls):
+def get_unprocessed_urls(processed_urls, continue_process, warc_files_end_date, warc_files_start_date):
     cc_news_crawl_names = get_remote_index(warc_files_start_date, warc_files_end_date)
     global n_warc_files_on_cc
     n_warc_files_on_cc = len(cc_news_crawl_names)
     # multiprocessing (iterate the list of crawl_names, and for each: download and process it)
-    logger.info('creating extraction process pool with %i processes', nproc)
+
     warc_download_urls = []
 
-    logger.info(f'found {n_warc_files_on_cc} files at commoncrawl.org {len(fully_extracted_warc_urls)} locally')
+    logger.info(f'found {n_warc_files_on_cc} files at commoncrawl.org {len(processed_urls)} locally')
     for name in cc_news_crawl_names:
         url = CC_BASE_URL + name
-        if continue_process:
-            # check if the current WARC has already been fully extracted (assuming that the filter criteria have not
-            # been changed!)
-            if url in fully_extracted_warc_urls:
-                logger.info('skipping WARC because fully extracted: %s' % url)
-                global __counter_warc_skipped
-                __counter_warc_skipped += 1
-                pass
-            else:
-                warc_download_urls.append(url)
-
+        if url in processed_urls:
+            logger.info(f'skipping WARC because fully extracted: {url}')
+            global __counter_warc_skipped
+            __counter_warc_skipped += 1
+            pass
         else:
-            # if not continue process, then always add
             warc_download_urls.append(url)
-    # raise ValueError(f'n_warc_download_urls={len(warc_download_urls)}')
-    # run the crawler in the current, single process if number of extraction processes is set to 1
     try:
         urls_to_process = get_urls_to_process_oracle(warc_download_urls)
     except KeyError:

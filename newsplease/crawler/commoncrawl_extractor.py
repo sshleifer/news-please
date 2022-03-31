@@ -14,20 +14,29 @@ import hashlib
 from ago import human
 from dateutil import parser
 from warcio.archiveiterator import ArchiveIterator
-import requests, warcio
+import requests
 from fsspec.core import url_to_fs
 import json
 from .. import NewsPlease, EmptyResponseError
 
-logging.getLogger('requests').setLevel(logging.CRITICAL)
-logging.getLogger('readability').setLevel(logging.CRITICAL)
-logging.getLogger("botocore").setLevel(logging.CRITICAL)  # Much noise
-logging.getLogger("botocore.credentials").setLevel(logging.CRITICAL)  # Much noise
-logging.getLogger("aibotocore.credentials").setLevel(logging.CRITICAL)  # Much noise
-logging.getLogger('PIL').setLevel(logging.CRITICAL)
-logging.getLogger('newspaper').setLevel(logging.CRITICAL)
-logging.getLogger('newsplease').setLevel(logging.CRITICAL)
-logging.getLogger('urllib3').setLevel(logging.CRITICAL)
+
+def less_noise():
+    lev = logging.INFO
+    logging.getLogger('requests').setLevel(lev)
+    logging.getLogger('readability').setLevel(lev)
+    logging.getLogger("botocore").setLevel(lev)  # Much noise
+    logging.getLogger("botocore.credentials").setLevel(lev)  # Much noise
+    logging.getLogger("aibotocore.credentials").setLevel(lev)  # Much noise
+    logging.getLogger('PIL').setLevel(lev)
+    logging.getLogger('newspaper').setLevel(lev)
+    logging.getLogger('newsplease').setLevel(lev)
+    logging.getLogger('urllib3').setLevel(lev)
+    logging.getLogger('jieba').setLevel(lev)
+    logging.getLogger('s3fs').setLevel(lev)
+
+
+
+less_noise()
 
 
 class CommonCrawlExtractor:
@@ -39,7 +48,7 @@ class CommonCrawlExtractor:
                  strict_date=True,
                  reuse_previously_downloaded_files=True,
                  continue_after_error=True, ignore_unicode_errors=False,
-                 show_download_progress=False, log_level=logging.ERROR, delete_warc_after_extraction=True,
+                 show_download_progress=False, log_level=logging.INFO, delete_warc_after_extraction=True,
                  logfile=None, fetch_images=False):
         """
         Crawl and extract articles form the news crawl provided by commoncrawl.org. For each article that was extracted
@@ -61,11 +70,6 @@ class CommonCrawlExtractor:
         self.delete_warc_after_extraction = delete_warc_after_extraction
         self.logfile = logfile
         self.download_fs, _ =  url_to_fs(self.save_dir)
-        self._set_loggers()
-
-
-    def _set_loggers(self):
-        # try to make loggers quiet
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(self.log_level)
 
@@ -109,13 +113,11 @@ class CommonCrawlExtractor:
             json.dump(article.__dict__, outfile, default=str, separators=(',', ':'), ensure_ascii=False, sort_keys=True)
 
     def process_warc_gz_url(self, url):
+        """Iterates all transactions in one WARC file and for each transaction tries to extract an article object.
+        Each article is checked against the filter criteria and if all are passed, the article is saved to save_dir
         """
-        Iterates all transactions in one WARC file and for each transaction tries to extract an article object.
-        Afterwards, each article is checked against the filter criteria and if all are passed, the function
-        on_valid_article_extracted is invoked with the article object.
-        """
-
         print(f'Processing {url}')
+        self.logger.info(f'URL={url}')
         n_articles = 0
         n_good = 0
         n_bad = 0
@@ -147,7 +149,7 @@ class CommonCrawlExtractor:
                     elapsed_secs = time.time() - start_time
                     secs_per_article = elapsed_secs / n_articles
                     self.logger.info('pass = %i, discard = %i, error = %i, total = %i', n_good, n_bad, n_error, n_articles)
-                    self.logger.info('extraction from current WARC file started %s; %f s/article/process', human(start_time), secs_per_article)
+                    self.logger.info(f'extraction from current WARC {url} started {human(start_time)}; %f s/article/process', human(start_time), secs_per_article)
             except:
                 if False: #self.continue_after_error:
                     self.logger.error('Unexpected error: %s (%s)', *sys.exc_info()[0:2])
@@ -156,6 +158,7 @@ class CommonCrawlExtractor:
                     pass
                 else:
                     raise
+        self.logger.info(f'Completed WARC {url}')
         self.save_status(url, 1 if n_good > 0 else 0)
         self.callback_on_warc_completed(url, n_good, n_bad, n_error, n_articles)
         return 1
