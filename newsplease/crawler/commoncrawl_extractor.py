@@ -72,6 +72,7 @@ class CommonCrawlExtractor:
         self.download_fs, _ =  url_to_fs(self.save_dir)
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(self.log_level)
+        self.example_buffer = {}
 
     def filter_record(self, warc_record, article) -> bool:
         """Returns true if a record passes all tests: hosts, publishing date"""
@@ -124,7 +125,7 @@ class CommonCrawlExtractor:
         n_error = 0
         start_time = time.time()
         resp = requests.get(url, stream=True)
-        for record in ArchiveIterator(resp.raw):
+        for i, record in enumerate(ArchiveIterator(resp.raw)):
             if record.rec_type != 'response':
                 continue
             try:
@@ -145,7 +146,7 @@ class CommonCrawlExtractor:
                     else:
                         self.logger.info('article discard (%s)', record.rec_headers.get_header('WARC-Target-URI'))
 
-                if n_articles % 100 == 0:
+                if n_articles % 5000 == 0:
                     elapsed_secs = time.time() - start_time
                     secs_per_article = elapsed_secs / n_articles
                     self.logger.info('pass = %i, discard = %i, error = %i, total = %i', n_good, n_bad, n_error, n_articles)
