@@ -194,12 +194,13 @@ def finished_warc_callback(warc_path, counter_article_passed, counter_article_di
 
 
 import warcio
+from warcio.exceptions import ArchiveLoadFailed
 def extract(warc_url,  **kwargs):
     cce = CommonCrawlExtractor(**kwargs)
     try:
         cce.process_warc_gz_file(warc_url)
-    except warcio.exceptions.ArchiveLoadFailed:
-        cce.save_status(url, 0)
+    except ArchiveLoadFailed:
+        cce.save_status(warc_url, 0)
 
 
 def crawl_from_commoncrawl(valid_hosts=None,
