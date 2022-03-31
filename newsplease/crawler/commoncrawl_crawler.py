@@ -18,37 +18,9 @@ from dateutil import parser
 from scrapy.utils.log import configure_logging
 
 from ..crawler.commoncrawl_extractor import CommonCrawlExtractor
-ORACLE_HOSTS = {'inst-0kygf-elegant-pegasus': 0,
- 'inst-1peuj-elegant-pegasus': 1,
- 'inst-4ilmp-elegant-pegasus': 2,
- 'inst-4mhhw-elegant-pegasus': 3,
- 'inst-6utfo-elegant-pegasus': 4,
- 'inst-8cas1-elegant-pegasus': 5,
- 'inst-bm1tl-elegant-pegasus': 6,
- 'inst-c3vih-elegant-pegasus': 7,
- 'inst-ceia2-elegant-pegasus': 8,
- 'inst-cu41e-elegant-pegasus': 9,
- 'inst-czlp2-elegant-pegasus': 10,
- 'inst-d6zdi-elegant-pegasus': 11,
- 'inst-dxwdy-elegant-pegasus': 12,
- 'inst-e06o7-elegant-pegasus': 13,
- 'inst-e7jdm-elegant-pegasus': 14,
- 'inst-eg5rm-elegant-pegasus': 15,
- 'inst-evudf-elegant-pegasus': 16,
- 'inst-faunu-elegant-pegasus': 17,
- 'inst-ieq5l-elegant-pegasus': 18,
- 'inst-ixm8o-elegant-pegasus': 19,
- 'inst-kwjdc-elegant-pegasus': 20,
- 'inst-n8ztw-elegant-pegasus': 21,
- 'inst-nmggj-elegant-pegasus': 22,
- 'inst-pvwsj-elegant-pegasus': 23,
- 'inst-qsk26-elegant-pegasus': 24,
- 'inst-qukiw-elegant-pegasus': 25,
- 'inst-rt9cr-elegant-pegasus': 26,
- 'inst-szfph-elegant-pegasus': 27,
- 'inst-t6h37-elegant-pegasus': 28,
- 'inst-xl6if-elegant-pegasus': 29,
- 'inst-z2ukx-elegant-pegasus': 30}
+
+SLURMLIST="inst-0kygf-elegant-pegasus,inst-1peuj-elegant-pegasus,inst-4ilmp-elegant-pegasus,inst-4mhhw-elegant-pegasus,inst-6utfo-elegant-pegasus,inst-8cas1-elegant-pegasus,inst-bm1tl-elegant-pegasus,inst-c3vih-elegant-pegasus,inst-ceia2-elegant-pegasus,inst-cu41e-elegant-pegasus,inst-czlp2-elegant-pegasus,inst-dxwdy-elegant-pegasus,inst-e06o7-elegant-pegasus,inst-e7jdm-elegant-pegasus,inst-eg5rm-elegant-pegasus,inst-evudf-elegant-pegasus,inst-faunu-elegant-pegasus,inst-ieq5l-elegant-pegasus,inst-ixm8o-elegant-pegasus,inst-kwjdc-elegant-pegasus,inst-n8ztw-elegant-pegasus,inst-nmggj-elegant-pegasus,inst-pvwsj-elegant-pegasus,inst-qsk26-elegant-pegasus,inst-qukiw-elegant-pegasus,inst-rt9cr-elegant-pegasus,inst-szfph-elegant-pegasus,inst-t6h37-elegant-pegasus,inst-xl6if-elegant-pegasus,inst-z2ukx-elegant-pegasus"
+ORACLE_HOSTS = {k: i for i,k in enumerate(SLURMLIST.split(','))}
 
 def _get_host_id():
     

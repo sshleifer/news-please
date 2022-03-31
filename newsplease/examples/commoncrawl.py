@@ -46,9 +46,11 @@ __credits__ = ["Sebastian Nagel"]
 
 ############ YOUR CONFIG ############
 # download dir for warc files
-my_local_download_dir_warc = './cc_download_warc/'
+DATA_DIR = "s3://character-ai-eu-frankfurt-1/checkpoints/sam/cc_news"
+
+my_local_download_dir_warc = os.path.join(DATA_DIR, 'warc')
 # download dir for articles
-my_local_download_dir_article = './cc_download_articles/'
+my_local_download_dir_article = os.path.join(DATA_DIR, 'articles')
 # hosts (if None or empty list, any host is OK)
 my_filter_valid_hosts = []  # example: ['elrancaguino.cl']
 # start date (if None, any date is OK as start date), as datetime

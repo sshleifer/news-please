@@ -16,19 +16,30 @@ from hurry.filesize import size
 from scrapy.utils.log import configure_logging
 from six.moves import urllib
 from warcio.archiveiterator import ArchiveIterator
-
+from fsspec.core import url_to_fs
+import json
 from .. import NewsPlease, EmptyResponseError
+
+
 
 __author__ = "Felix Hamborg"
 __copyright__ = "Copyright 2017"
 __credits__ = ["Sebastian Nagel"]
+def set_creds():
+    
+    rclone_config = json.loads(sh.rclone("config", "dump").stdout)
+    oci_cfg = rclone_config["oci"]
+    os.environ["AWS_SECRET_ACCESS_KEY"] = oci_cfg["secret_access_key"]
+    os.environ["AWS_ACCESS_KEY_ID"] = oci_cfg["access_key_id"]
+    os.environ["AZURE_STORAGE_ACCOUNT_NAME"] = rclone_config["azure"]["account"]
+    os.environ["AZURE_STORAGE_ACCOUNT_KEY"] = rclone_config["azure"]["key"]
 
 
 class CommonCrawlExtractor:
     # remote url where we can download the warc file
     __warc_download_url = None
     # download dir for warc files
-    __local_download_dir_warc = './cc_download_warc/'
+    __local_download_dir_warc = ''
     # hosts (if None or empty list, any host is OK)
     __filter_valid_hosts = []  # example: ['elrancaguino.cl']
     # start date (if None, any date is OK as start date), as datetime
@@ -71,8 +82,13 @@ class CommonCrawlExtractor:
         Setup
         :return:
         """
-        os.makedirs(self.__local_download_dir_warc, exist_ok=True)
+        #os.makedirs(self.__local_download_dir_warc, exist_ok=True)
+        self.fs, _ =  url_to_fs(self.__local_download_dir_warc)
+        #os.makedirs(self.__local_download_dir_warc, exist_ok=True)
+        self._set_loggers()
 
+
+    def _set_loggers(self):
         # make loggers quite
         configure_logging({"LOG_LEVEL": "ERROR"})
         logging.getLogger('requests').setLevel(logging.CRITICAL)
@@ -86,6 +102,7 @@ class CommonCrawlExtractor:
         logging.basicConfig(level=self.__log_level)
         self.__logger = logging.getLogger(__name__)
         self.__logger.setLevel(self.__log_level)
+        
 
     def __register_fully_extracted_warc_file(self, warc_url):
         """
@@ -94,7 +111,7 @@ class CommonCrawlExtractor:
         :return:
         """
         if self.__log_pathname_fully_extracted_warcs is not None:
-            with open(self.__log_pathname_fully_extracted_warcs, 'a') as log_file:
+            with self.fs.open(self.__log_pathname_fully_extracted_warcs, 'a') as log_file:
                 log_file.write(warc_url + '\n')
 
     def filter_record(self, warc_record, article=None):
@@ -206,6 +223,10 @@ class CommonCrawlExtractor:
         else:  # total size is unknown
             sys.stdout.write("\rread %s" % (size(readsofar)))
 
+    def __download_fsspec(self, url) -> str:
+        fs,
+        pass
+
     def __download(self, url):
         """
         Download and save a file locally.
@@ -215,7 +236,7 @@ class CommonCrawlExtractor:
         local_filename = urllib.parse.quote_plus(url)
         local_filepath = os.path.join(self.__local_download_dir_warc, local_filename)
 
-        if os.path.isfile(local_filepath) and self.__reuse_previously_downloaded_files:
+        if path_exists(local_filepath) and self.__reuse_previously_downloaded_files:
             self.__logger.info("found local file %s, not downloading again due to configuration", local_filepath)
             return local_filepath
         else:
@@ -227,7 +248,8 @@ class CommonCrawlExtractor:
 
             # download
             self.__logger.info('downloading %s (local: %s)', url, local_filepath)
-            urllib.request.urlretrieve(url, local_filepath, reporthook=self.__on_download_progress_update)
+            with self.fs.open(local_filepath) as f:
+                urllib.request.urlretrieve(url, f, reporthook=self.__on_download_progress_update)
             self.__logger.info('download completed, local file: %s', local_filepath)
             return local_filepath
 
@@ -247,8 +269,9 @@ class CommonCrawlExtractor:
         counter_article_discarded = 0
         counter_article_error = 0
         start_time = time.time()
+        # FIXME
 
-        with open(path_name, 'rb') as stream:
+        with self.fs.open(path_name, 'rb') as stream:
             for record in ArchiveIterator(stream):
                 try:
                     if record.rec_type == 'response':
@@ -367,3 +390,8 @@ class CommonCrawlExtractor:
         self.__log_pathname_fully_extracted_warcs = log_pathname_fully_extracted_warcs
 
         self.__run()
+
+
+def path_exists(uri_or_path):
+    fs, _ = url_to_fs(uri_or_path)
+    return fs.exists(uri_or_path)
