@@ -198,7 +198,7 @@ from warcio.exceptions import ArchiveLoadFailed
 def extract(warc_url,  **kwargs):
     cce = CommonCrawlExtractor(**kwargs)
     try:
-        cce.process_warc_gz_file(warc_url)
+        cce.process_warc_gz_url(warc_url)
     except ArchiveLoadFailed:
         cce.save_status(warc_url, 0)
 
