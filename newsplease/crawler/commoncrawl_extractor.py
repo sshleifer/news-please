@@ -4,15 +4,11 @@ Provides functionality to crawl and extract news articles from a single WARC fil
 and host list, can be defined. Currently, the WARC file will be downloaded to the path_or_url WORKINGDIR/cc_download_warc, if
 not otherwise specified.
 """
-import datetime
 import logging
 import os
 
-import sys
-from filelock import FileLock
 import time
 import hashlib
-from ago import human
 from dateutil import parser
 from warcio.archiveiterator import ArchiveIterator
 import requests
@@ -41,7 +37,8 @@ def buffer_to_files():
     pass
 
 less_noise()
-from typing import List, Tuple
+from typing import List
+
 
 class CommonCrawlExtractor:
     def __init__(self,
@@ -130,7 +127,7 @@ class CommonCrawlExtractor:
         n_good = 0
         start_time = time.time()
         resp = requests.get(url, stream=True)
-        def log_msg(i):
+        def log_msg(i, n_good):
             elapsed_secs = time.time() - start_time
             n_processed = (i - resume_idx)
             secs_per_article = elapsed_secs / n_processed
@@ -138,7 +135,8 @@ class CommonCrawlExtractor:
             process_throughput = i/elapsed_secs
             msg = f'{url}: {i} {elapsed_secs // 60} mins, n={n_processed}, bad={frac_bad:.2f}, rate={process_throughput:.2f}'
             return msg
-
+        if resume_idx > 0:
+            self.logger.info(f'Skipping to example {resume_idx}')
         for i, record in enumerate(ArchiveIterator(resp.raw)):
             if i < resume_idx: continue
             if record.rec_type != 'response': continue
@@ -146,33 +144,27 @@ class CommonCrawlExtractor:
                 article = self._from_warc(record)
             except (UnicodeDecodeError, EmptyResponseError):
                 continue
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                self.logger.info(f'Exception type: {type(e)} ignored.')
+                continue
             n_good += 1
             self.example_buffer.append(article)
             if len(self.example_buffer) >= flush_frequency:
                 self.save_and_reset_buffer(subdir, i)
-                self.logger.info(log_msg(i))
+                self.logger.info(log_msg(i, n_good))
                 if stop_early: break
 
 
         self.save_and_reset_buffer(subdir, i)
-        msg = f'Completed: {log_msg(i)}'
+        msg = f'Completed: {log_msg(i,  n_good)}'
         self.logger.info(msg)
-        self.callback_on_warc_completed(url, n_good, i-n_good, 0, i)
+        if self.callback_on_warc_completed is not None:
+            self.callback_on_warc_completed(url, n_good, i-n_good, 0, i)
         return self.n_files_saved
 
 
 def path_exists(uri_or_path):
     fs, _ = url_to_fs(uri_or_path)
     return fs.exists(uri_or_path)
-
-
-def fname_to_date(path_or_url):
-    fn = os.path.basename(path_or_url)
-    # Assume the filename pattern is CC-NEWS-20160911145202-00018.warc.gz
-    fn = fn.replace('CC-NEWS-', '')
-    dt = fn.split('-')[0]
-    try:
-        return datetime.datetime.strptime(dt, '%Y%m%d%H%M%S').date()
-    except ValueError as e:
-        #raise ValueError(f'Could not convert fn={fn},dt={dt}')
-        return None #20210327090019
