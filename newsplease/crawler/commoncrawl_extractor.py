@@ -118,7 +118,7 @@ class CommonCrawlExtractor:
         self.example_buffer = []
         self.n_files_saved += 1
 
-    def process_warc_gz_url(self, url, subdir, flush_frequency = 1000, stop_early=False, resume_idx=0):
+    def process_warc_gz_url(self, url, subdir, flush_frequency=10000, stop_early=False, resume_idx=0):
         """Iterates all transactions in one WARC file and for each transaction tries to extract an article object.
         Each article is checked against the filter criteria and if all are passed, the article is saved to save_dir
         """
@@ -172,7 +172,7 @@ def fname_to_date(path_or_url):
     fn = fn.replace('CC-NEWS-', '')
     dt = fn.split('-')[0]
     try:
-        return datetime.datetime.strptime(dt, '%Y%m%d%H%M%S')
+        return datetime.datetime.strptime(dt, '%Y%m%d%H%M%S').date()
     except ValueError as e:
         #raise ValueError(f'Could not convert fn={fn},dt={dt}')
         return None #20210327090019

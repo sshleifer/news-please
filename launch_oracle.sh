@@ -7,31 +7,32 @@ pdsh -w $PARTIAL_LIST /home/sam/news-please/launcher2.sh
 
 ssh inst-xl6if-elegant-pegasus bash /home/sam/news-please/launcher2.sh
 
-sleep 1s && ssh inst-dxwdy-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-c3vih-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-8cas1-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-4ilmp-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-6utfo-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-czlp2-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-nmggj-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-t6h37-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-szfph-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-faunu-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-cu41e-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-ixm8o-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-kwjdc-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-qsk26-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-4mhhw-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-qukiw-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-e7jdm-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-ieq5l-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-eg5rm-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-bm1tl-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-n8ztw-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-e06o7-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-evudf-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-pvwsj-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-z2ukx-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-0kygf-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-ceia2-elegant-pegasus bash sudo pkill -f newsplease &
-sleep 1s && ssh inst-rt9cr-elegant-pegasus bash sudo pkill -f newsplease &
+sleep 10s && ssh inst-dxwdy-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-c3vih-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-8cas1-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-4ilmp-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-6utfo-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-czlp2-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-nmggj-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-t6h37-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-szfph-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-faunu-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-cu41e-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-ixm8o-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-kwjdc-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-qsk26-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-4mhhw-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-qukiw-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-e7jdm-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-ieq5l-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-eg5rm-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-bm1tl-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-n8ztw-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-e06o7-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-evudf-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-pvwsj-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-z2ukx-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+
+
+sleep 10s && ssh inst-0kygf-elegant-pegasus bash /home/sam/news-please/launcher2.sh &
+sleep 10s && ssh inst-ceia2-elegant-pegasus bash /home/sam/news-please/launcher2.sh &

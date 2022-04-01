@@ -41,7 +41,6 @@ def _get_host_id():
 
 # commoncrawl.org
 CC_BASE_URL = 'https://commoncrawl.s3.amazonaws.com/'
-ARTICLE_DIR = "s3://datasets/cc_news/v0"
 # log file of fully extracted WARC files
 n_warc_files_on_cc = 0
 __counter_warc_skipped = 0
@@ -76,25 +75,13 @@ def _is_date_within_period(date, start_date=None, end_date=None) -> bool:
     return start_date <= date < end_date
 
 # aws s3 ls --recursive s3://commoncrawl/crawl-data/CC-NEWS/ --no-sign-request | awk '{ print $4 }' > cc_full.index
-def get_remote_index(warc_files_start_date, warc_files_end_date, temp_filename = 'cc.index'):
+def get_remote_index(min_date, max_date, temp_filename ='cc.index'):
     """Gets the index of news crawl files from commoncrawl.org and returns an array of names
     """
-    awk_parameter = '"{ print $4 }"' if os.name == 'nt' else "'{ print $4 }'"
-    cmd = ''
-    if warc_files_start_date or warc_files_end_date:
-        # The news files are grouped per year and month in separate folders
-        warc_dates = __iterate_by_month(start_date=warc_files_start_date, end_date=warc_files_end_date)
-        for date in warc_dates:
-            year = date.strftime('%Y')
-            month = date.strftime('%m')
-            cmd += "aws s3 ls --recursive s3://commoncrawl/crawl-data/CC-NEWS/%s/%s/ --no-sign-request >> %s && " % (year, month, temp_filename)
-
-    else:
-        cmd = "aws s3 ls --recursive s3://commoncrawl/crawl-data/CC-NEWS/ --no-sign-request > %s && " % temp_filename
+    cmd = "aws s3 ls --recursive s3://commoncrawl/crawl-data/CC-NEWS/ --no-sign-request > %s && " % temp_filename
     awk_parameter = '"{ print $4 }"' if os.name == 'nt' else "'{ print $4 }'"
     cmd += f"awk {awk_parameter} {temp_filename} "
     logger.info('executing: %s', cmd)
-
     exitcode, stdout_data = subprocess.getstatusoutput(cmd)
 
     if exitcode > 0:
@@ -102,13 +89,13 @@ def get_remote_index(warc_files_start_date, warc_files_end_date, temp_filename =
 
     lines = stdout_data.splitlines()
 
-    if warc_files_start_date or warc_files_end_date:
+    if min_date or max_date:
         # Now filter further on day of month, hour, minute
         lines = [
             p for p in lines if _is_date_within_period(
                 fname_to_date(p),
-                start_date=warc_files_start_date,
-                end_date=warc_files_end_date,
+                start_date=min_date,
+                end_date=max_date,
             )
         ]
     #os.remove(temp_filename)
@@ -202,22 +189,22 @@ def extract(url, logfile, stop_early=False, **kwargs):
 
 
 
-def main(nproc=64, save_dir=ARTICLE_DIR, logfile='/home/sam/cc_news_url_status.jsonl', stop_early=False):
+def main(nproc=64, save_dir="s3://datasets/cc_news/v1", logfile='/home/sam/v1/cc_news_url_status.jsonl', stop_early=False):
     """"""
     # example valid_hosts ['elrancaguino.cl'] # hosts (if None or empty list, any host is OK)
-
     # datetime.datetime(2016, 1, 1) # start date (if None, any date is OK as start date), as datetime
-    if nproc == 1:
-        files_since = datetime.datetime(2021, 3, 1, 12, 30)
-        files_before = datetime.datetime(2021, 3, 15, 12, 55)
-
-    else:
-        files_since, files_before = None, None
+    # if nproc == 1:
+    #     files_since = datetime.datetime(2021, 3, 1, 12, 30)
+    #     files_before = datetime.datetime(2021, 3, 15, 12, 55)
+    #
+    #
+    min_date = datetime.date(2020,3, 1)
+    max_date = datetime.date(2022,3, 1)
 
     done_urls = read_completed_urls(logfile)
-    urls_to_process = get_unprocessed_urls(done_urls, files_before, files_since)
-    if stop_early:
-        urls_to_process  = urls_to_process[:nproc]
+    urls_to_process = get_unprocessed_urls(done_urls, min_date, max_date)
+    logger.info(f'{len(urls_to_process)} on this worker')
+    #if stop_early: urls_to_process  = urls_to_process[:nproc]
     kwargs = dict(logfile=logfile,
                   save_dir=save_dir,
                   callback_on_warc_completed=finished_warc_callback,
@@ -236,7 +223,7 @@ def main(nproc=64, save_dir=ARTICLE_DIR, logfile='/home/sam/cc_news_url_status.j
 
 
 
-def get_unprocessed_urls(processed_urls, max_date, min_date):
+def get_unprocessed_urls(processed_urls, min_date, max_date):
     cc_news_crawl_names = get_remote_index(min_date, max_date)
     #cc_news_crawl_names = [x.strip() for x in open('cc_full.index').readlines()]
     global n_warc_files_on_cc
@@ -247,6 +234,8 @@ def get_unprocessed_urls(processed_urls, max_date, min_date):
 
     logger.info(f'found {n_warc_files_on_cc} files at commoncrawl.org {len(processed_urls)} locally')
     for name in cc_news_crawl_names:
+        if not name.endswith('warc.gz'): continue
+
         url = CC_BASE_URL + name
         if url in processed_urls:
             logger.info(f'skipping WARC because fully extracted: {url}')
@@ -259,7 +248,8 @@ def get_unprocessed_urls(processed_urls, max_date, min_date):
         urls_to_process = get_urls_to_process_oracle(warc_download_urls)
     except KeyError:
         urls_to_process = warc_download_urls
-    return urls_to_process
+
+    return list(reversed(sorted(urls_to_process))) # newer first
 
 
 def get_urls_to_process_oracle(warc_download_urls):
