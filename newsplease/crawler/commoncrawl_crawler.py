@@ -1,39 +1,27 @@
 #!/usr/bin/env python
 """
 Provides functionality to crawl and extract news articles from commoncrawl.org. Filter criteria, such as publish date
-and host list, can be defined. Currently, all WARC files will be downloaded to the path WORKINGDIR/cc_download_warc, if
+and host list, can be defined. Currently, all WARC files will be downloaded to the path_or_url WORKINGDIR/cc_download_warc, if
 not otherwise specified.
 """
-import logging
-from multiprocessing.sharedctypes import Value
-import os
 import subprocess
-import tempfile
 import time
 from functools import partial
 from multiprocessing import Pool
-import datetime
-import socket
-from dateutil import parser
+from newsplease.crawler.commoncrawl_extractor import fname_to_date
 from scrapy.utils.log import configure_logging
 
 from ..crawler.commoncrawl_extractor import CommonCrawlExtractor, less_noise
 
-from fire import Fire
-import hashlib
 import json
 import logging
 import os
-import sys
 import datetime
-from datetime import date
 
-import socket
 import sh
-import warcio
 from warcio.exceptions import ArchiveLoadFailed
 from pathlib import Path
-ROOT_DIR = Path(__file__).parent.parent
+ROOT_DIR = Path(__file__).parent.parent.parent
 assert ROOT_DIR.name == 'news-please', ROOT_DIR
 INDEX_FILE = os.path.join(ROOT_DIR, 'cc_full.index')
 
@@ -53,8 +41,7 @@ def _get_host_id():
 
 # commoncrawl.org
 CC_BASE_URL = 'https://commoncrawl.s3.amazonaws.com/'
-DATA_DIR = "s3://character-ai-eu-frankfurt-1/checkpoints/sam/cc_news"
-ARTICLE_DIR = os.path.join(DATA_DIR, 'articles')
+ARTICLE_DIR = "s3://datasets/cc_news/v0"
 # log file of fully extracted WARC files
 n_warc_files_on_cc = 0
 __counter_warc_skipped = 0
@@ -63,7 +50,6 @@ __start_time = time.time()
 
 
 CC_START_DATE = datetime.datetime(2016, 8, 26) # When Common Crawl started.
-configure_logging({"LOG_LEVEL": "ERROR"})
 
 
 def __iterate_by_month(start_date=None, end_date=None, month_step=1):
@@ -77,18 +63,6 @@ def __iterate_by_month(start_date=None, end_date=None, month_step=1):
         carry, new_month = divmod(current_date.month - 1 + month_step, 12)
         new_month += 1
         current_date = current_date.replace(year=current_date.year + carry, month=new_month)
-
-
-def __extract_date_from_warc_filename(path):
-    fn = os.path.basename(path)
-    # Assume the filename pattern is CC-NEWS-20160911145202-00018.warc.gz
-    fn = fn.replace('CC-NEWS-', '')
-    dt = fn.split('-')[0]
-    try:
-        return datetime.datetime.strptime(dt, '%Y%m%d%H%M%S')
-    except ValueError as e:
-        #raise ValueError(f'Could not convert fn={fn},dt={dt}')
-        return None #20210327090019
 
 
 def _is_date_within_period(date, start_date=None, end_date=None) -> bool:
@@ -105,6 +79,7 @@ def _is_date_within_period(date, start_date=None, end_date=None) -> bool:
 def get_remote_index(warc_files_start_date, warc_files_end_date, temp_filename = 'cc.index'):
     """Gets the index of news crawl files from commoncrawl.org and returns an array of names
     """
+    awk_parameter = '"{ print $4 }"' if os.name == 'nt' else "'{ print $4 }'"
     cmd = ''
     if warc_files_start_date or warc_files_end_date:
         # The news files are grouped per year and month in separate folders
@@ -119,7 +94,7 @@ def get_remote_index(warc_files_start_date, warc_files_end_date, temp_filename =
     awk_parameter = '"{ print $4 }"' if os.name == 'nt' else "'{ print $4 }'"
     cmd += f"awk {awk_parameter} {temp_filename} "
     logger.info('executing: %s', cmd)
-    raise ValueError(cmd)
+
     exitcode, stdout_data = subprocess.getstatusoutput(cmd)
 
     if exitcode > 0:
@@ -131,21 +106,26 @@ def get_remote_index(warc_files_start_date, warc_files_end_date, temp_filename =
         # Now filter further on day of month, hour, minute
         lines = [
             p for p in lines if _is_date_within_period(
-                __extract_date_from_warc_filename(p),
+                fname_to_date(p),
                 start_date=warc_files_start_date,
                 end_date=warc_files_end_date,
             )
         ]
-    os.remove(temp_filename)
+    #os.remove(temp_filename)
     return lines
 
 
-def get_fully_extracted_warc_urls(log_file):
+def read_completed_urls(log_file):
     """Reads in the log file that contains a list of all previously, fully extracted WARC urls"""
-    if not os.path.isfile(log_file):
-        return []
-    with open(log_file) as log:
-        return [x.strip().split(',')[1] for x in log.readlines()]
+    completed_urls = []
+    if not os.path.exists(log_file):
+        return completed_urls
+    with jsonlines.open(log_file, 'r') as reader:
+        for record in reader:
+            if record.get('completed', False):
+                completed_urls.append(record['url'])
+    return completed_urls
+
 
 def set_creds():
     rclone_config = json.loads(sh.rclone("config", "dump").stdout)
@@ -178,53 +158,87 @@ def finished_warc_callback(warc_path, counter_article_passed, counter_article_di
     logger.info("estimated remaining time [h] = %f", remaining_warcs / h_per_warc)
 
 
+def remove_suffix(text: str, suffix: str):
+    if text.endswith(suffix):
+        return text[:-len(suffix)]
+    return text  # or whatever
 
-def extract(warc_url,  **kwargs):
+import time
+import jsonlines
+from filelock import FileLock
+
+def extract(url, logfile, stop_early=False, **kwargs):
+    assert url.endswith('warc.gz')
+    save_dir = kwargs['save_dir']
+    start_time = time.strftime('%Y-%m-%d-%H:%M:%S')
     cce = CommonCrawlExtractor(**kwargs)
+    save_subdir = remove_suffix(url.split('crawl-data/')[1], '.warc.gz')
+    assert 'https' not in save_subdir, save_subdir
+    assert '.com' not in save_subdir, save_subdir
+    full_save_dir = os.path.join(save_dir, save_subdir)
+    # like s3://datasets/cc_news/mar31/CC-NEWS/2021/03/CC-NEWS-20210307190521-00595
+    warcio_error = False
+    completed = False
+    n_files = 0
     try:
-        cce.process_warc_gz_url(warc_url)
+        n_files = cce.process_warc_gz_url(url, full_save_dir, stop_early=stop_early)
+        completed = not stop_early
     except ArchiveLoadFailed:
-        cce.save_status(warc_url, 0)
+        warcio_error = True
+
+    data = dict(url=url, full_save_dir=full_save_dir, completed=completed,
+                warcio_error=warcio_error,
+                nfiles=n_files, hostname=socket.gethostname(),
+                start_ts=start_time,
+                end_ts=time.strftime('%Y-%m-%d-%H:%M:%S'))
+    #data_str = json.dumps(data)
+
+    lock = FileLock('/home/sam/cc_news.lock')
+
+    with lock.acquire():
+        with jsonlines.open(logfile, mode='a') as writer:
+            writer.write(data)
 
 
-def crawl_from_commoncrawl(valid_hosts=None,
-                           logfile=None,
-                           start_date=None, end_date=None, warc_files_start_date=None, warc_files_end_date=None,
-                           strict_date=True, reuse_previously_downloaded_files=True, save_dir=None,
-                           continue_after_error=True, show_download_progress=False, nproc=4, log_level=logging.ERROR,
-                           delete_warc_after_extraction=True, # TODO(SS): Del
-                           continue_process=True, fetch_images=False,
-                           process_hardcoded_partition=True):
-    """
-    Crawl and extract articles form the news crawl provided by commoncrawl.org. For each article that was extracted
-    successfully the callback function callback_on_article_extracted is invoked where the first parameter is the
-    article object.
-    """
-    done_urls = get_fully_extracted_warc_urls(logfile) if logfile is not None and continue_process else []
-    urls_to_process = get_unprocessed_urls(done_urls, continue_process, warc_files_end_date, warc_files_start_date)
 
-    kwargs = dict(save_dir=save_dir,
+
+def main(nproc=64, save_dir=ARTICLE_DIR, logfile='/home/sam/cc_news_url_status.jsonl', stop_early=False):
+    """"""
+    # example valid_hosts ['elrancaguino.cl'] # hosts (if None or empty list, any host is OK)
+
+    # datetime.datetime(2016, 1, 1) # start date (if None, any date is OK as start date), as datetime
+    if nproc == 1:
+        files_since = datetime.datetime(2021, 3, 1, 12, 30)
+        files_before = datetime.datetime(2021, 3, 15, 12, 55)
+
+    else:
+        files_since, files_before = None, None
+
+    done_urls = read_completed_urls(logfile)
+    urls_to_process = get_unprocessed_urls(done_urls, files_before, files_since)
+    if stop_early:
+        urls_to_process  = urls_to_process[:nproc]
+    kwargs = dict(logfile=logfile,
+                  save_dir=save_dir,
                   callback_on_warc_completed=finished_warc_callback,
-                  start_date=start_date, end_date=end_date,
-                  strict_date=strict_date,
-                  reuse_previously_downloaded_files=reuse_previously_downloaded_files,
-                  continue_after_error=continue_after_error,
-                  show_download_progress=show_download_progress,
-                  log_level=log_level,
-                  delete_warc_after_extraction=delete_warc_after_extraction,
-                  fetch_images=fetch_images)
+                  stop_early=stop_early)
 
     if nproc > 1:
         with Pool(nproc) as proc_pool:
             map_fn = partial(extract, **kwargs)
             proc_pool.map(map_fn, urls_to_process)
     else:
-        for url in urls_to_process:
+        from tqdm import tqdm
+        for url in tqdm(urls_to_process):
             extract(url, **kwargs)
+            if stop_early:
+                return
 
 
-def get_unprocessed_urls(processed_urls, continue_process, warc_files_end_date, warc_files_start_date):
-    cc_news_crawl_names = get_remote_index(warc_files_start_date, warc_files_end_date)
+
+def get_unprocessed_urls(processed_urls, max_date, min_date):
+    cc_news_crawl_names = get_remote_index(min_date, max_date)
+    #cc_news_crawl_names = [x.strip() for x in open('cc_full.index').readlines()]
     global n_warc_files_on_cc
     n_warc_files_on_cc = len(cc_news_crawl_names)
     # multiprocessing (iterate the list of crawl_names, and for each: download and process it)
@@ -259,52 +273,7 @@ def get_urls_to_process_oracle(warc_download_urls):
     return urls_to_process
 
 logging.getLogger("botocore.credentials").setLevel(logging.WARNING)  # Much noise
-
 logging.getLogger("sh").setLevel(logging.WARNING)  # Much noise
-
-
-
-
-def main(nproc=64, save_dir=ARTICLE_DIR, logfile='/home/sam/cc_news_url_status.log'):
-    """"""
-    # example valid_hosts ['elrancaguino.cl'] # hosts (if None or empty list, any host is OK)
-
-    # datetime.datetime(2016, 1, 1) # start date (if None, any date is OK as start date), as datetime
-    if nproc == 1:
-        files_since = datetime.datetime(2021, 3, 1, 12, 30)
-        files_before = datetime.datetime(2021, 3, 15, 12, 55)
-    else:
-        files_since, files_before = None, None
-    start_date, end_date = None, None
-    # if date filtering is strict and news-please could not detect the date of an article, the article will be discarded
-    my_filter_strict_date = False
-    # if True, the script checks whether a file has been downloaded already and uses that file instead of downloading
-    # again. Note that there is no check whether the file has been downloaded completely or is valid!
-    my_reuse_previously_downloaded_files = True
-    continue_after_error = True  # continue after error
-    show_download_progress = True  # show the progress of downloading the WARC files
-    json_style = 0  # 0 (minimize), 1 (pretty)
-    my_delete_warc_after_extraction = True  # if True, the WARC file will be deleted after all articles have been extracted from it
-    my_continue_process = True  # if True, will continue extraction from the latest fully downloaded but not fully extracted WARC files and then crawling new WARC files.
-    my_fetch_images = False
-    ############ END YOUR CONFIG #########
-    crawl_from_commoncrawl(valid_hosts=[],
-                           start_date=start_date,
-                           end_date=end_date,
-                           warc_files_start_date=files_since,
-                           warc_files_end_date=files_before,
-                           strict_date=my_filter_strict_date,
-                           reuse_previously_downloaded_files=my_reuse_previously_downloaded_files,
-                           save_dir=save_dir,
-                           continue_after_error=continue_after_error,
-                           show_download_progress=show_download_progress,
-                           nproc=nproc,
-                           log_level=log_level,
-                           delete_warc_after_extraction=my_delete_warc_after_extraction,
-                           continue_process=True,
-                           logfile=logfile,
-                           fetch_images=my_fetch_images)
-
 
 from fire import Fire
 if __name__ == "__main__":

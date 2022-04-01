@@ -235,7 +235,7 @@ class SavepathParser(object):
         Figures out the savepath's absolute version.
 
         :param str savepath: the savepath to return an absolute version of
-        :param str relative_to_path: the file path this savepath should be
+        :param str relative_to_path: the file path_or_url this savepath should be
                                      relative to
         :return str: absolute version of savepath
         """
@@ -249,7 +249,7 @@ class SavepathParser(object):
     def get_abs_path(self, savepath):
         """
         Determines the savepath's absolute version relative to the cfg file
-        path.
+        path_or_url.
 
         :param str savepath: the savepath to return an absolute version of
         :return str: absolute version of savepath
@@ -259,13 +259,13 @@ class SavepathParser(object):
     @staticmethod
     def get_base_path(path):
         """
-        Determines the longest possible beginning of a path that does not
+        Determines the longest possible beginning of a path_or_url that does not
         contain a %-Symbol.
 
         /this/is/a/pa%th would become /this/is/a
 
-        :param str path: the path to get the base from
-        :return: the path's base
+        :param str path: the path_or_url to get the base from
+        :return: the path_or_url's base
         """
         if "%" not in path:
             return path
@@ -279,11 +279,11 @@ class SavepathParser(object):
 
     def get_formatted_relative_path(self, path):
         """
-        Formates path to not start with a leading './' or '.\' if enables in
+        Formates path_or_url to not start with a leading './' or '.\' if enables in
         the config
 
-        :param str path: the path to format
-        :return str: the [formatted] path
+        :param str path: the path_or_url to format
+        :return str: the [formatted] path_or_url
         """
         if self.format_relative_path and \
                 (path.startswith('./') or path.startswith('.\\')):
@@ -308,7 +308,7 @@ class SavepathParser(object):
                 .replace('%appendmd5_max_url_file_name', '')
         )
 
-        # Windows: max file path length is 260 characters including
+        # Windows: max file path_or_url length is 260 characters including
         # NULL (string end)
         max_size = 260 - 1 - size_without_max_url_file_name
         max_size_per_occurrence = max_size / number_occurrences
@@ -318,7 +318,7 @@ class SavepathParser(object):
     @staticmethod
     def get_filename(savepath):
         """
-        Returns only the filename of the given path.
+        Returns only the filename of the given path_or_url.
         :param savepath:
         :return:
         """

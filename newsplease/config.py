@@ -77,7 +77,7 @@ class CrawlerConfig(object):
         """
         Setup the actual class.
 
-        :param str filepath: path to the config-file (including file-name)
+        :param str filepath: path_or_url to the config-file (including file-name)
         """
         if self.log is not None:
             self.log.warning("Disallowed multiple setup of config.")
@@ -201,7 +201,7 @@ class CrawlerConfig(object):
 
     def get_working_path(self):
         """
-        Gets the working path. If the path starts with a ~, this will be replaced by the current user's home path.
+        Gets the working path_or_url. If the path_or_url starts with a ~, this will be replaced by the current user's home path_or_url.
         :return:
         """
         self.set_section('Files')
@@ -258,7 +258,7 @@ class JsonConfig(object):
         """
         Setup the actual class.
 
-        :param str filepath: path to the config-file (including file-name)
+        :param str filepath: path_or_url to the config-file (including file-name)
         """
         self.log.debug("Loading JSON-file (%s)", filepath)
         self.load_json(filepath)

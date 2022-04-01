@@ -94,12 +94,12 @@ class NewsPleaseLauncher(object):
 
         # Get & set CFG and JSON locally.
         if cfg_directory_path:
-            # if a path was given by the user
+            # if a path_or_url was given by the user
             self.cfg_directory_path = self.get_expanded_path(cfg_directory_path)
         else:
-            # if no path was given by the user, use default
+            # if no path_or_url was given by the user, use default
             self.cfg_directory_path = self.get_expanded_path(self.config_directory_default_path)
-        # init cfg path if empty
+        # init cfg path_or_url if empty
         self.init_config_file_path_if_empty()
         self.cfg_file_path = self.cfg_directory_path + self.config_file_default_name
 
@@ -286,7 +286,7 @@ class NewsPleaseLauncher(object):
 
     def init_config_file_path_if_empty(self):
         """
-        if the config file path does not exist, this function will initialize the path with a default
+        if the config file path_or_url does not exist, this function will initialize the path_or_url with a default
         config file
         :return
         """
@@ -300,7 +300,7 @@ class NewsPleaseLauncher(object):
         else:
             sys.stdout.write(
                 "Config directory does not exist at '" + os.path.abspath(self.cfg_directory_path) + "'. "
-                + "Should a default configuration be created at this path? [Y/n] ")
+                + "Should a default configuration be created at this path_or_url? [Y/n] ")
             if sys.version_info[0] < 3:
                 user_choice = raw_input()
             else:
@@ -316,13 +316,13 @@ class NewsPleaseLauncher(object):
             sys.stdout.write("Config file will not be created. Terminating.")
             sys.exit(1)
 
-        # copy the default config file to the new path
+        # copy the default config file to the new path_or_url
         copy_tree(os.environ['CColon'] + os.path.sep + 'config', self.cfg_directory_path)
         return
 
     def get_expanded_path(self, path):
         """
-        expands a path that starts with an ~ to an absolute path
+        expands a path_or_url that starts with an ~ to an absolute path_or_url
         :param path:
         :return:
         """
@@ -334,16 +334,16 @@ class NewsPleaseLauncher(object):
     def get_abs_file_path(self, rel_file_path,
                           quit_on_error=None, check_relative_to_path=True):
         """
-        Returns the absolute file path of the given [relative] file path
+        Returns the absolute file path_or_url of the given [relative] file path_or_url
         to either this script or to the config file.
 
         May throw a RuntimeError if quit_on_error is True.
 
-        :param str rel_file_path: relative file path
+        :param str rel_file_path: relative file path_or_url
         :param bool quit_on_error: determines if the script may throw an
                                    exception
-        :return str: absolute file path of the given relative file path
-        :raises RuntimeError: if the file path does not exist and
+        :return str: absolute file path_or_url of the given relative file path_or_url
+        :raises RuntimeError: if the file path_or_url does not exist and
                               quit_on_error is True
         """
         if self.cfg_file_path is not None and \
@@ -673,7 +673,7 @@ Cleanup files:
 
 
 @plac.annotations(
-    cfg_file_path=plac.Annotation('path to the config file', 'option', 'c'),
+    cfg_file_path=plac.Annotation('path_or_url to the config file', 'option', 'c'),
     resume=plac.Annotation('resume crawling from last process', 'flag'),
     reset_elasticsearch=plac.Annotation('reset Elasticsearch indexes', 'flag'),
     reset_json=plac.Annotation('reset JSON files', 'flag'),

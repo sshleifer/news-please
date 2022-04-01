@@ -522,7 +522,7 @@ class HtmlFileStorage(ExtractedInformationStorage):
         # Add a log entry confirming the save
         self.log.info("Saving HTML to %s", item['abs_local_path'])
 
-        # Ensure path exists
+        # Ensure path_or_url exists
         dir_ = os.path.dirname(item['abs_local_path'])
         os.makedirs(dir_, exist_ok=True)
 
@@ -547,7 +547,7 @@ class JsonFileStorage(ExtractedInformationStorage):
         # Add a log entry confirming the save
         self.log.info("Saving JSON to %s", file_path)
 
-        # Ensure path exists
+        # Ensure path_or_url exists
         dir_ = os.path.dirname(item['abs_local_path'])
         os.makedirs(dir_, exist_ok=True)
 

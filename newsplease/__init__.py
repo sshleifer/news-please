@@ -143,7 +143,7 @@ class NewsPlease:
     def from_file(path):
         """
         Crawls articles from the urls and extracts relevant information.
-        :param path: path to file containing urls (each line contains one URL)
+        :param path: path_or_url to file containing urls (each line contains one URL)
         :return: A dict containing given URLs as keys, and extracted information as corresponding values.
         """
         with open(path) as f:
