@@ -258,7 +258,7 @@ class SingleCrawler(object):
 
     def remove_jobdir_if_not_resume(self):
         """
-        This method ensures that there's no JOBDIR (with the name and path
+        This method ensures that there's no JOBDIR (with the name and path_or_url
         stated in the config file) any crawler would automatically resume
         crawling with if '--resume' isn't passed to this script.
         """

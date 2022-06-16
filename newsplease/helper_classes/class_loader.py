@@ -5,7 +5,7 @@ class ClassLoader:
 	@classmethod
 	def from_string(cls, class_name):
 		if "." not in class_name:
-			raise ImportError("{0} doesn't look like a module path".format(class_name))
+			raise ImportError("{0} doesn't look like a module path_or_url".format(class_name))
 
 		module_name = ".".join(class_name.split(".")[:-1])
 		class_name = class_name.split(".")[-1]

@@ -13,7 +13,7 @@ class NewscrawlerItem(scrapy.Item):
     local_path = scrapy.Field()
     # Filename
     filename = scrapy.Field()
-    # absolute path of the file on the local filesystem
+    # absolute path_or_url of the file on the local filesystem
     abs_local_path = scrapy.Field()
     # When the article was last modified in the DB
     modified_date = scrapy.Field()

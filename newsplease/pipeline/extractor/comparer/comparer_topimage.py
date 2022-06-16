@@ -23,7 +23,7 @@ class ComparerTopimage():
 
         for article_candidate in list_article_candidate:
             if article_candidate.topimage is not None:
-                # Changes a relative path of an image to the absolute path of the given url.
+                # Changes a relative path_or_url of an image to the absolute path_or_url of the given url.
                 article_candidate.topimage = self.image_absoulte_path(item['url'], article_candidate.topimage)
                 list_topimage.append((article_candidate.topimage, article_candidate.extractor))
 
@@ -41,7 +41,7 @@ class ComparerTopimage():
             return list_newspaper[0][0]
 
     def image_absoulte_path(self, url, image):
-        """if the image url does not start with 'http://' it will take the absolute path from the url
+        """if the image url does not start with 'http://' it will take the absolute path_or_url from the url
         and fuses them with urljoin"""
         if not re.match(re_http, image):
             topimage = urljoin(url, image)

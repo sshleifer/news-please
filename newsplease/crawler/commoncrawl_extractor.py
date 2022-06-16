@@ -1,369 +1,170 @@
 #!/usr/bin/env python
 """
 Provides functionality to crawl and extract news articles from a single WARC file from commoncrawl.org. Filter criteria, such as publish date
-and host list, can be defined. Currently, the WARC file will be downloaded to the path WORKINGDIR/cc_download_warc, if
+and host list, can be defined. Currently, the WARC file will be downloaded to the path_or_url WORKINGDIR/cc_download_warc, if
 not otherwise specified.
 """
 import logging
 import os
-import subprocess
-import sys
+
 import time
-
-from ago import human
+import hashlib
 from dateutil import parser
-from hurry.filesize import size
-from scrapy.utils.log import configure_logging
-from six.moves import urllib
 from warcio.archiveiterator import ArchiveIterator
-
+import requests
+from fsspec.core import url_to_fs
+import json
 from .. import NewsPlease, EmptyResponseError
 
-__author__ = "Felix Hamborg"
-__copyright__ = "Copyright 2017"
-__credits__ = ["Sebastian Nagel"]
+
+def less_noise():
+    lev = logging.ERROR
+    logging.getLogger('requests').setLevel(lev)
+    logging.getLogger('readability').setLevel(lev)
+    logging.getLogger("botocore").setLevel(lev)  # Much noise
+    logging.getLogger("botocore.credentials").setLevel(lev)  # Much noise
+    logging.getLogger("aibotocore.credentials").setLevel(lev)  # Much noise
+    logging.getLogger('PIL').setLevel(lev)
+    logging.getLogger('newspaper').setLevel(lev)
+    logging.getLogger('newsplease').setLevel(lev)
+    logging.getLogger('urllib3').setLevel(lev)
+    logging.getLogger('jieba').setLevel(lev)
+    logging.getLogger('s3fs').setLevel(lev)
+    logging.getLogger('filelock').setLevel(lev)
+    logging.getLogger('jieba').setLevel(lev)
+
+def buffer_to_files():
+    pass
+
+less_noise()
+from typing import List
 
 
 class CommonCrawlExtractor:
-    # remote url where we can download the warc file
-    __warc_download_url = None
-    # download dir for warc files
-    __local_download_dir_warc = './cc_download_warc/'
-    # hosts (if None or empty list, any host is OK)
-    __filter_valid_hosts = []  # example: ['elrancaguino.cl']
-    # start date (if None, any date is OK as start date), as datetime
-    __filter_start_date = None
-    # end date (if None, any date is OK as end date)
-    __filter_end_date = None
-    # if date filtering is string, e.g., if we could not detect the date of an article, we will discard the article
-    __filter_strict_date = True
-    # if True, the script checks whether a file has been downloaded already and uses that file instead of downloading
-    # again. Note that there is no check whether the file has been downloaded completely or is valid!
-    __reuse_previously_downloaded_files = True
-    # continue after error
-    __continue_after_error = False
-    # ignore unicode errors
-    __ignore_unicode_errors = False
-    # fetch images
-    __fetch_images = False
-    # log level
-    __log_level = logging.INFO
-    __delete_warc_after_extraction = True
-    __log_pathname_fully_extracted_warcs = None
-
-    # commoncrawl.org
-    __cc_base_url = 'https://commoncrawl.s3.amazonaws.com/'
-    __cc_news_crawl_names = None
-
-    # event handler called when an article was extracted successfully and passed all filter criteria
-    __callback_on_article_extracted = None
-    # event handler called when a warc file is fully processed
-    __callback_on_warc_completed = None
-    # if the download progress is shown
-    __show_download_progress = False
-
-    # logging
-    logging.basicConfig(level=__log_level)
-    __logger = logging.getLogger(__name__)
-
-    def __setup(self):
-        """
-        Setup
-        :return:
-        """
-        os.makedirs(self.__local_download_dir_warc, exist_ok=True)
-
-        # make loggers quite
-        configure_logging({"LOG_LEVEL": "ERROR"})
-        logging.getLogger('requests').setLevel(logging.CRITICAL)
-        logging.getLogger('readability').setLevel(logging.CRITICAL)
-        logging.getLogger('PIL').setLevel(logging.CRITICAL)
-        logging.getLogger('newspaper').setLevel(logging.CRITICAL)
-        logging.getLogger('newsplease').setLevel(logging.CRITICAL)
-        logging.getLogger('urllib3').setLevel(logging.CRITICAL)
-
-        # set own logger
-        logging.basicConfig(level=self.__log_level)
-        self.__logger = logging.getLogger(__name__)
-        self.__logger.setLevel(self.__log_level)
-
-    def __register_fully_extracted_warc_file(self, warc_url):
-        """
-        Saves the URL warc_url in the log file for fully extracted WARC URLs
-        :param warc_url:
-        :return:
-        """
-        if self.__log_pathname_fully_extracted_warcs is not None:
-            with open(self.__log_pathname_fully_extracted_warcs, 'a') as log_file:
-                log_file.write(warc_url + '\n')
-
-    def filter_record(self, warc_record, article=None):
-        """
-        Returns true if a record passes all tests: hosts, publishing date
-        :param warc_record:
-        :return: A tuple of (True or False) and an article (might be None)
-        """
-        # filter by host
-        if self.__filter_valid_hosts:
-            url = warc_record.rec_headers.get_header('WARC-Target-URI')
-
-            # very simple check, check if one of the required host names is contained in the url of the WARC transaction
-            # better would be to extract the host name from the WARC transaction Target URI and then check for equality
-            # because currently something like g.co?forward_url=facebook.com would yield a positive filter test for
-            # facebook.com even though the actual host is g.co
-            for valid_host in self.__filter_valid_hosts:
-                if valid_host in url:
-                    break
-            else:
-                return False, article
-
-        # filter by date
-        if self.__filter_start_date or self.__filter_end_date:
-            if not article:
-                article = self._from_warc(warc_record)
-
-            publishing_date = self.__get_publishing_date(warc_record, article)
-            if not publishing_date:
-                if self.__filter_strict_date:
-                    return False, article
-            else:  # here we for sure have a date
-                # is article published too early?
-                if self.__filter_start_date and publishing_date < self.__filter_start_date:
-                    return False, article
-                if self.__filter_end_date and publishing_date > self.__filter_end_date:
-                    return False, article
-
-        return True, article
-
-    def __get_publishing_date(self, warc_record, article):
-        """
-        Extracts the publishing date from the record
-        :param warc_record:
-        :return:
-        """
-        if hasattr(article, 'date_publish'):
-            return parser.parse(article.date_publish) if isinstance(article.date_publish, str) else article.date_publish
-        else:
-            return None
-
-    def __get_download_url(self, name):
-        """
-        Creates a download url given the name
-        :param name:
-        :return:
-        """
-        return self.__cc_base_url + name
-
-    def __get_remote_index(self):
-        """
-        Gets the index of news crawl files from commoncrawl.org and returns an array of names
-        :return:
-        """
-        temp_filename = "tmpaws.txt"
-
-        if os.name == 'nt':
-            awk_parameter = '"{ print $4 }"'
-        else:
-            awk_parameter = "'{ print $4 }'"
-
-        # get the remote info
-        cmd = "aws s3 ls --recursive s3://commoncrawl/crawl-data/CC-NEWS/ --no-sign-request > %s && " \
-              "awk %s %s " % (temp_filename, awk_parameter, temp_filename)
-
-        self.__logger.info('executing: %s', cmd)
-        exitcode, stdout_data = subprocess.getstatusoutput(cmd)
-
-        if exitcode > 0:
-            raise Exception(stdout_data)
-
-        print(stdout_data)
-
-        try:
-            os.remove(temp_filename)
-        except OSError:
-            pass
-
-        lines = stdout_data.splitlines()
-        return lines
-
-    def __on_download_progress_update(self, blocknum, blocksize, totalsize):
-        """
-        Prints some download progress information
-        :param blocknum:
-        :param blocksize:
-        :param totalsize:
-        :return:
-        """
-        if not self.__show_download_progress:
-            return
-
-        readsofar = blocknum * blocksize
-        if totalsize > 0:
-            s = "\r%s / %s" % (size(readsofar), size(totalsize))
-            sys.stdout.write(s)
-            if readsofar >= totalsize:  # near the end
-                sys.stderr.write("\r")
-        else:  # total size is unknown
-            sys.stdout.write("\rread %s" % (size(readsofar)))
-
-    def __download(self, url):
-        """
-        Download and save a file locally.
-        :param url: Where to download from
-        :return: File path name of the downloaded file
-        """
-        local_filename = urllib.parse.quote_plus(url)
-        local_filepath = os.path.join(self.__local_download_dir_warc, local_filename)
-
-        if os.path.isfile(local_filepath) and self.__reuse_previously_downloaded_files:
-            self.__logger.info("found local file %s, not downloading again due to configuration", local_filepath)
-            return local_filepath
-        else:
-            # cleanup
-            try:
-                os.remove(local_filepath)
-            except OSError:
-                pass
-
-            # download
-            self.__logger.info('downloading %s (local: %s)', url, local_filepath)
-            urllib.request.urlretrieve(url, local_filepath, reporthook=self.__on_download_progress_update)
-            self.__logger.info('download completed, local file: %s', local_filepath)
-            return local_filepath
-
-    def _from_warc(self, record):
-        return NewsPlease.from_warc(record, decode_errors="replace" if self.__ignore_unicode_errors else "strict", fetch_images=self.__fetch_images)
-
-    def __process_warc_gz_file(self, path_name):
-        """
-        Iterates all transactions in one WARC file and for each transaction tries to extract an article object.
-        Afterwards, each article is checked against the filter criteria and if all are passed, the function
-        on_valid_article_extracted is invoked with the article object.
-        :param path_name:
-        :return:
-        """
-        counter_article_total = 0
-        counter_article_passed = 0
-        counter_article_discarded = 0
-        counter_article_error = 0
-        start_time = time.time()
-
-        with open(path_name, 'rb') as stream:
-            for record in ArchiveIterator(stream):
-                try:
-                    if record.rec_type == 'response':
-                        counter_article_total += 1
-
-                        # if the article passes filter tests, we notify the user
-                        try:
-                            filter_pass, article = self.filter_record(record)
-                        except (UnicodeDecodeError, EmptyResponseError):
-                            filter_pass = False
-                        if filter_pass:
-                            try:
-                                if not article:
-                                    article = self._from_warc(record)
-                            except (UnicodeDecodeError, EmptyResponseError):
-                                filter_pass = False
-                        if filter_pass:
-                            counter_article_passed += 1
-
-                            self.__logger.info('article pass (%s; %s; %s)', article.source_domain, article.date_publish,
-                                               article.title)
-                            self.__callback_on_article_extracted(article)
-                        else:
-                            counter_article_discarded += 1
-
-                            if article:
-                                self.__logger.info('article discard (%s; %s; %s)', article.source_domain,
-                                                   article.date_publish,
-                                                   article.title)
-                            else:
-                                self.__logger.info('article discard (%s)',
-                                                   record.rec_headers.get_header('WARC-Target-URI'))
-
-                        if counter_article_total % 10 == 0:
-                            elapsed_secs = time.time() - start_time
-                            secs_per_article = elapsed_secs / counter_article_total
-                            self.__logger.info('statistics')
-                            self.__logger.info('pass = %i, discard = %i, error = %i, total = %i',
-                                               counter_article_passed,
-                                               counter_article_discarded, counter_article_error, counter_article_total)
-                            self.__logger.info('extraction from current WARC file started %s; %f s/article',
-                                               human(start_time), secs_per_article)
-                except:
-                    if self.__continue_after_error:
-                        self.__logger.error('Unexpected error: %s (%s)', *sys.exc_info()[0:2])
-                        self.__logger.error(sys.exc_info()[2], exc_info=True)
-                        counter_article_error += 1
-                        pass
-                    else:
-                        raise
-
-        # cleanup
-        if self.__delete_warc_after_extraction:
-            os.remove(path_name)
-
-        self.__register_fully_extracted_warc_file(self.__warc_download_url)
-        self.__callback_on_warc_completed(self.__warc_download_url, counter_article_passed, counter_article_discarded,
-                                          counter_article_error, counter_article_total)
-
-    def __run(self):
-        """
-        Main execution method, which consists of: get an up-to-date list of WARC files, and for each of them: download
-        and extract articles. Each article is checked against a filter. Finally, for each valid article the method
-        on_valid_article_extracted will be invoked after the extraction of the article has completed.
-        :return:
-        """
-        self.__setup()
-
-        local_path_name = self.__download(self.__warc_download_url)
-        self.__process_warc_gz_file(local_path_name)
-
-    def extract_from_commoncrawl(self, warc_download_url, callback_on_article_extracted,
-                                 callback_on_warc_completed=None,
-                                 valid_hosts=None,
-                                 start_date=None, end_date=None,
-                                 strict_date=True, reuse_previously_downloaded_files=True, local_download_dir_warc=None,
-                                 continue_after_error=True, ignore_unicode_errors=False,
-                                 show_download_progress=False, log_level=logging.ERROR, delete_warc_after_extraction=True,
-                                 log_pathname_fully_extracted_warcs=None, fetch_images=False):
+    def __init__(self,
+                 save_dir, callback_on_warc_completed=None, valid_hosts=None, start_date=None, end_date=None,
+                 strict_date=True, ignore_unicode_errors=False, log_level=logging.INFO, fetch_images=False
+                 ):
         """
         Crawl and extract articles form the news crawl provided by commoncrawl.org. For each article that was extracted
         successfully the callback function callback_on_article_extracted is invoked where the first parameter is the
         article object.
-        :param log_pathname_fully_extracted_warcs:
-        :param delete_warc_after_extraction:
-        :param warc_download_url:
-        :param callback_on_article_extracted:
-        :param callback_on_warc_completed:
-        :param valid_hosts:
-        :param start_date:
-        :param end_date:
-        :param strict_date:
-        :param reuse_previously_downloaded_files:
-        :param local_download_dir_warc:
-        :param continue_after_error:
-        :param show_download_progress:
-        :param log_level:
-        :return:
         """
-        self.__warc_download_url = warc_download_url
-        self.__filter_valid_hosts = valid_hosts
-        self.__filter_start_date = start_date
-        self.__filter_end_date = end_date
-        self.__filter_strict_date = strict_date
-        if local_download_dir_warc:
-            self.__local_download_dir_warc = local_download_dir_warc
-        self.__reuse_previously_downloaded_files = reuse_previously_downloaded_files
-        self.__continue_after_error = continue_after_error
-        self.__ignore_unicode_errors = ignore_unicode_errors
-        self.__fetch_images = fetch_images
-        self.__callback_on_article_extracted = callback_on_article_extracted
-        self.__callback_on_warc_completed = callback_on_warc_completed
-        self.__show_download_progress = show_download_progress
-        self.__log_level = log_level
-        self.__delete_warc_after_extraction = delete_warc_after_extraction
-        self.__log_pathname_fully_extracted_warcs = log_pathname_fully_extracted_warcs
+        self.filter_valid_hosts = valid_hosts
+        self.start_date = start_date
+        self.end_date = end_date
+        self.strict_date = strict_date
+        self.save_dir = save_dir
 
-        self.__run()
+        self.ignore_unicode_errors = ignore_unicode_errors
+        self.fetch_images = fetch_images
+        self.callback_on_warc_completed = callback_on_warc_completed
+        self.log_level = log_level
+        self.download_fs, _ =  url_to_fs(self.save_dir) # could del
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(self.log_level)
+        self.example_buffer: List[NewsPlease] = []
+        self.n_files_saved = 0
+
+    def filter_record(self, warc_record, article) -> bool:
+        """Returns true if a record passes all tests: hosts, publishing date"""
+        if self.filter_valid_hosts:
+            url = warc_record.rec_headers.get_header('WARC-Target-URI')
+            # very simple check, check if one of the required host names is contained in the url of the WARC transaction
+            # better would be to extract the host name from the WARC transaction Target URI and then check for equality
+            # because currently something like g.co?forward_url=facebook.com would yield a positive filter test for
+            # facebook.com even though the actual host is g.co
+            for valid_host in self.filter_valid_hosts:
+                if valid_host in url:
+                    return False
+
+        if self.start_date or self.end_date:
+            pdate = getattr(article, 'date_publish', None)
+            publishing_date = parser.parse(pdate) if isinstance(pdate, str) else pdate
+            if not publishing_date:
+                if self.strict_date:
+                    return False
+            else:  # here we for sure have a date
+                # is article published too early?
+                if self.start_date and publishing_date < self.start_date:
+                    return False
+                if self.end_date and publishing_date > self.end_date:
+                    return False
+        return True
+
+    def _from_warc(self, record) -> NewsPlease:
+        decode_errors = "replace" if self.ignore_unicode_errors else "strict"
+        return NewsPlease.from_warc(record, decode_errors=decode_errors, fetch_images=self.fetch_images)
+
+    def save(self):
+        """to {save_dir}/article.source_domain/hash(article.filename).json"""
+
+        short_filename = hashlib.sha256(article.filename.encode()).hexdigest()
+        domain_dir = os.path.join(self.save_dir, article.source_domain)
+        save_path = os.path.join(domain_dir, short_filename + '.json')
+        self.download_fs.makedirs(domain_dir, exist_ok=True)
+        with self.download_fs.open(save_path, 'w', encoding='utf-8') as outfile:
+            json.dump(article.__dict__, outfile, default=str, separators=(',', ':'), ensure_ascii=False, sort_keys=True)
+
+    def save_and_reset_buffer(self, subdir, i):
+        save_path = os.path.join(subdir, f'last_record_{i}.json')
+        data = [x.__dict__ for x in self.example_buffer]
+        if not data: return
+        with self.download_fs.open(save_path, 'w', encoding='utf-8') as outfile:
+            json.dump(data, outfile, default=str, separators=(',', ':'), ensure_ascii=False, sort_keys=True)
+        self.example_buffer = []
+        self.n_files_saved += 1
+
+    def process_warc_gz_url(self, url, subdir, flush_frequency=10000, stop_early=False, resume_idx=0):
+        """Iterates all transactions in one WARC file and for each transaction tries to extract an article object.
+        Each article is checked against the filter criteria and if all are passed, the article is saved to save_dir
+        """
+        self.logger.info(f'URL={url}, SAVE_DIR={subdir}')
+        print(f'URL={url}, SAVE_DIR={subdir}')
+
+        # Assume the filename pattern is CC-NEWS-20160911145202-00018.warc.gz
+
+        n_good = 0
+        start_time = time.time()
+        resp = requests.get(url, stream=True)
+        def log_msg(i, n_good):
+            elapsed_secs = time.time() - start_time
+            n_processed = (i - resume_idx)
+            secs_per_article = elapsed_secs / n_processed
+            frac_bad = 1 - n_good/n_processed
+            process_throughput = i/elapsed_secs
+            msg = f'{url}: {i} {elapsed_secs // 60} mins, n={n_processed}, bad={frac_bad:.2f}, rate={process_throughput:.2f}'
+            return msg
+        if resume_idx > 0:
+            self.logger.info(f'Skipping to example {resume_idx}')
+        for i, record in enumerate(ArchiveIterator(resp.raw)):
+            if i < resume_idx: continue
+            if record.rec_type != 'response': continue
+            try:
+                article = self._from_warc(record)
+            except (UnicodeDecodeError, EmptyResponseError):
+                continue
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                self.logger.info(f'Exception type: {type(e)} ignored.')
+                continue
+            n_good += 1
+            self.example_buffer.append(article)
+            if len(self.example_buffer) >= flush_frequency:
+                self.save_and_reset_buffer(subdir, i)
+                self.logger.info(log_msg(i, n_good))
+                if stop_early: break
+
+
+        self.save_and_reset_buffer(subdir, i)
+        msg = f'Completed: {log_msg(i,  n_good)}'
+        self.logger.info(msg)
+        if self.callback_on_warc_completed is not None:
+            self.callback_on_warc_completed(url, n_good, i-n_good, 0, i)
+        return self.n_files_saved
+
+
+def path_exists(uri_or_path):
+    fs, _ = url_to_fs(uri_or_path)
+    return fs.exists(uri_or_path)

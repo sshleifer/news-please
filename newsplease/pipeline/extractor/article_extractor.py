@@ -20,7 +20,6 @@ class Extractor:
         """
         def proc_instance(instance):
             if instance is not None:
-                self.log.info('Extractor initialized: %s', extractor)
                 self.extractor_list.append(instance)
             else:
                 self.log.error("Misconfiguration: An unknown Extractor was found and"
